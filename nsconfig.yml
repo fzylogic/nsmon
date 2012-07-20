@@ -1,0 +1,6 @@
+testdomains: [dreamhost.com,www.dreamhost.com,dreamhoststatus.com]
+frequency: 2
+
+servers:
+  127.0.0.1:
+    timeout: 5
