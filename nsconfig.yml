@@ -11,8 +11,8 @@ min_up: 1
 cmds:
     serverup: "vtysh -c ‘configure terminal’ -c ‘ip route $floaterip/32 $serverip’"
     serverdown: "vtysh -c ‘configure terminal’ -c ‘no ip route $floaterip/32 $serverip’"
-    recovery: "vtysh -c 'configure terminal' -c 'router bgp 60001' -c 'no netwrok 10.100.0.0/24'"
-    panic: "vtysh -c 'configure terminal' -c 'router bgp 60001' -c 'netwrok 10.100.0.0/24'"
+    recovery: "vtysh -c 'configure terminal' -c 'router bgp 60001' -c 'no network 10.100.0.0/24'"
+    panic: "vtysh -c 'configure terminal' -c 'router bgp 60001' -c 'network 10.100.0.0/24'"
 
 ## LIst of servers to test, along with their respective options
 servers:
