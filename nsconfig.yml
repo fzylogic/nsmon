@@ -1,6 +1,20 @@
+# List of domains to attempt resolution for
 testdomains: [dreamhost.com,www.dreamhost.com,dreamhoststatus.com]
+# How often to run our checks
 frequency: 2
+# What's the minimum number of backend machines that need to be up
+min_up: 1
+# Our response commands.
+# Panic is run when there are no availalbe backend servers.
+# Recovery is run when at least $min_up machine recovers
 
+cmds:
+    serverup: "vtysh -c ‘configure terminal’ -c ‘ip route $floaterip/32 $serverip’"
+    serverdown: "vtysh -c ‘configure terminal’ -c ‘no ip route $floaterip/32 $serverip’"
+    recovery: "vtysh -c 'configure terminal' -c 'router bgp 60001' -c 'no netwrok 10.100.0.0/24'"
+    panic: "vtysh -c 'configure terminal' -c 'router bgp 60001' -c 'netwrok 10.100.0.0/24'"
+
+## LIst of servers to test, along with their respective options
 servers:
-  127.0.0.1:
-    timeout: 5
+    127.0.0.1:
+        timeout: 5
