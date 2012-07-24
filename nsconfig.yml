@@ -4,17 +4,27 @@ testdomains: [dreamhost.com,www.dreamhost.com,dreamhoststatus.com]
 frequency: 2
 # What's the minimum number of backend machines that need to be up
 min_up: 1
+# Floater IP
+floaterip: 10.100.0.5
+# BGP-Advertised Floater Network
+floaternet: 10.100.0.0/24
+# Autonomous System Network for BGP
+asnum: 60001
 # Our response commands.
 # Panic is run when there are no availalbe backend servers.
 # Recovery is run when at least $min_up machine recovers
 
 cmds:
-    serverup: "vtysh -c ‘configure terminal’ -c ‘ip route $floaterip/32 $serverip’"
-    serverdown: "vtysh -c ‘configure terminal’ -c ‘no ip route $floaterip/32 $serverip’"
-    recovery: "vtysh -c 'configure terminal' -c 'router bgp 60001' -c 'no network 10.100.0.0/24'"
-    panic: "vtysh -c 'configure terminal' -c 'router bgp 60001' -c 'network 10.100.0.0/24'"
+    serverup: "vtysh -c 'configure terminal' -c 'ip route $floaterip/32 $serverip'"
+    serverdown: "vtysh -c 'configure terminal' -c 'no ip route $floaterip/32 $serverip'"
+    recovery: "vtysh -c 'configure terminal' -c 'router bgp $asnum' -c 'no network $floaternet'"
+    panic: "vtysh -c 'configure terminal' -c 'rouTEr bgp $asnum' -c 'network $floaternet'"
 
 ## LIst of servers to test, along with their respective options
 servers:
+    #Server 1
     127.0.0.1:
         timeout: 5
+    #Server 2, expected to be slightly slower and that's OK
+    127.0.0.2:
+        timeout: 10
