@@ -8,15 +8,19 @@ import Queue
 import re
 import os
 import sys
+import datetime
 from time import sleep
+from time import time
 
 conffile = open('nsconfig.yml', 'r')
-syslog = 0
+syslog = False
+graphite = False
 
 
 def processConfig():
     nsconfig = yaml.load(conffile)
     cfg = {
+            'verbose': nsconfig.get('verbose', False),
             'domains': nsconfig.get('testdomains'),
             'frequency': nsconfig.get('frequency', 5),
             'serverup': nsconfig['cmds'].get('serverup'),
@@ -50,22 +54,34 @@ def processConfig():
 cfg = processConfig()
 
 
+def convertMilliseconds(timestring):
+    [hours, minutes, seconds] = str(timestring).split(':')
+    [seconds, microseconds] = seconds.split('.')
+    milliseconds = int(int(hours) * 60 * 60 * 1000) +\
+        int(int(minutes) * 60 * 1000) +\
+        int(int(seconds) * 1000) +\
+        int(int(microseconds) / 1000)
+    return milliseconds
+
+
 if cfg['logging']['graphite']['enabled']:
     from socket import socket
-    sock = socket()
     carbon_server = cfg['logging']['graphite']['carbon_server']
+    sock = socket()
     carbon_port = cfg['logging']['graphite']['carbon_port']
+    graphite = True
     try:
-        sock.connect(carbon_server, carbon_port)
+        sock.connect((carbon_server, carbon_port))
+        sock.close()
     except:
         print "Couldn't connect to %(server)s on port %(port)d,\
-              is carbon-agent.py running?" \
-              % {'server': carbon_server, 'port': carbon_port}
+             is carbon-agent.py running?" \
+             % {'server': carbon_server, 'port': carbon_port}
         sys.exit()
 
 
 if cfg['logging']['syslog']['enabled']:
-    syslog = 1
+    syslog = True
     import syslog
     syslog.openlog('nsmon', 0, syslog.LOG_USER)
 
@@ -92,19 +108,35 @@ class MonThread(threading.Thread):
         status = 'OK'
         while (1):
             for domain in cfg['domains']:
+                startTime = datetime.datetime.now()
                 try:
                     r = DNS.Request(domain, qtype='A',
                                     server=serverip,
                                     timeout=timeout).req()
+                    endTime = datetime.datetime.now()
+                    duration = convertMilliseconds(endTime - startTime)
                     if r.header['status'] == 'NOERROR':
-                        print domain + '@' + serverip + ' OK'
-                    if (status != 'OK'):
-                        statusQueue.put('OK ' + serverip)
+                        if cfg['verbose']:
+                            print domain + '@' + serverip + ' OK'
+                    if (status == 'OK'):
+                        statusQueue.put('OK'
+                                + ' '
+                                + serverip
+                                + ' '
+                                + domain
+                                + ' '
+                                + str(duration))
                         status = 'OK'
-                except DNS.SocketError:
-                    print str(serverip) + " Errored"
+                except:
+                    endTime = datetime.datetime.now()
+                    duration = convertMilliseconds(endTime - startTime)
                     if (status != 'BAD'):
-                        statusQueue.put('BAD ' + serverip)
+                        statusQueue.put('BAD '
+                                + serverip
+                                + ' '
+                                + domain
+                                + ' '
+                                + str(duration))
                         status = 'BAD'
             sleep(cfg['frequency'])
             if (cfg['cycles']):
@@ -134,39 +166,59 @@ def genCmd(cmd, serverip):
     for replacement in re.findall('\$[a-zA-Z0-9]+', cmd):
         replacementKey = replacement.replace('$', '')
         if replacementKey == 'serverip':
-            print 'replacing ' + replacement + ' with ' + serverip
             cmd = cmd.replace(replacement, serverip)
         elif replacementKey in cfg:
-            print 'replacing ' + replacement + ' with ' + cfg[replacementKey]
             cmd = cmd.replace(replacement, cfg[replacementKey])
         else:
             print 'cannot find ' + replacementKey + ' defined in config'
             sys.exit()
-    print 'cmd = ' + cmd
     return cmd
 
 
 while (1):
     while not statusQueue.empty():
         statusline = statusQueue.get()
-        [status, server] = statusline.split()
-        print 'processing ' + statusline
+        [status, server, domain, duration] = statusline.split()
+        if graphite:
+            try:
+                sock = socket()
+                sock.connect((carbon_server, carbon_port))
+                if cfg['verbose']:
+                    print 'nsmon.responsetime.' + server + '.' + domain\
+                        + ' '\
+                        + str(duration)\
+                        + ' '\
+                        + str(int(time()))\
+                        + '\n'
+
+                sock.sendall('nsmon.responsetime.' + server + '.' + domain
+                        + ' '
+                        + str(duration)
+                        + ' '
+                        + str(int(time()))
+                        + '\n')
+                sock.close()
+            except:
+                print 'cannot contact carbon server'
         if (status == 'OK' and server not in availableServers):
             availableServers.append(server)
             print 'Processing recovery of ' + server
             os.system(genCmd('serverup', server))
-            syslog.syslog(server + 'recovered')
+            if syslog:
+                syslog.syslog(server + 'recovered')
             if (len(availableServers) == cfg['min_up']):
                 # We just recovered from a failure state
                 # so we have to run recoverycmd
                 os.system(genCmd('recovery', server))
-                syslog.syslog('system recovered due to ' + server)
+                if syslog:
+                    syslog.syslog('system recovered due to ' + server)
         elif (status == 'BAD' and server in availableServers):
             availableServers.remove(server)
             print 'failing ' + server
             os.system(genCmd('serverdown', server))
             if (len(availableServers) == cfg['min_up'] - 1):
-                syslog.syslog(
+                if syslog:
+                    syslog.syslog(
                         'system being retracted due to failure of ' + server)
                 os.system(genCmd('paniccmd', server))
         sleep(1)
