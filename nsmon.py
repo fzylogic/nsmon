@@ -11,6 +11,7 @@ import sys
 from time import sleep
 
 conffile = open('nsconfig.yml', 'r')
+syslog = 0
 
 
 def processConfig():
@@ -28,11 +29,45 @@ def processConfig():
             'floaternet': nsconfig.get('floaternet'),
             'floaterip': nsconfig.get('floaterip'),
             'asnum': nsconfig.get('asnum', '61000'),
+            'logging': {
+                'graphite': {
+                    'enabled': nsconfig['logging']
+                            ['graphite'].get('enabled', 'no'),
+                    'carbon_server': nsconfig['logging']
+                            ['graphite'].get('carbon_server', '127.0.0.1'),
+                    'carbon_port': nsconfig['logging']
+                            ['graphite'].get('carbon_port', '127.0.0.1'),
+                            },
+                'syslog': {
+                    'enabled': nsconfig['logging']
+                            ['syslog'].get('enabled', 'no'),
+                            }
+                },
             }
     return cfg
 
 
 cfg = processConfig()
+
+
+if cfg['logging']['graphite']['enabled']:
+    from socket import socket
+    sock = socket()
+    carbon_server = cfg['logging']['graphite']['carbon_server']
+    carbon_port = cfg['logging']['graphite']['carbon_port']
+    try:
+        sock.connect(carbon_server, carbon_port)
+    except:
+        print "Couldn't connect to %(server)s on port %(port)d,\
+              is carbon-agent.py running?" \
+              % {'server': carbon_server, 'port': carbon_port}
+        sys.exit()
+
+
+if cfg['logging']['syslog']['enabled']:
+    syslog = 1
+    import syslog
+    syslog.openlog('nsmon', 0, syslog.LOG_USER)
 
 
 class MonThread(threading.Thread):
@@ -51,6 +86,8 @@ class MonThread(threading.Thread):
     def run(self):
         serverip = self.kwargs['server']
         print 'monitoring ' + serverip
+        if syslog:
+            syslog.syslog('monitoring ' + serverip)
         count = 0
         status = 'OK'
         while (1):
@@ -118,14 +155,18 @@ while (1):
             availableServers.append(server)
             print 'Processing recovery of ' + server
             os.system(genCmd('serverup', server))
+            syslog.syslog(server + 'recovered')
             if (len(availableServers) == cfg['min_up']):
                 # We just recovered from a failure state
                 # so we have to run recoverycmd
                 os.system(genCmd('recovery', server))
+                syslog.syslog('system recovered due to ' + server)
         elif (status == 'BAD' and server in availableServers):
             availableServers.remove(server)
             print 'failing ' + server
-            #os.system(genCmd('serverdown', server))
+            os.system(genCmd('serverdown', server))
             if (len(availableServers) == cfg['min_up'] - 1):
+                syslog.syslog(
+                        'system being retracted due to failure of ' + server)
                 os.system(genCmd('paniccmd', server))
         sleep(1)

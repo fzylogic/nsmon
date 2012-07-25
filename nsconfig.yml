@@ -20,6 +20,16 @@ cmds:
     recovery: "vtysh -c 'configure terminal' -c 'router bgp $asnum' -c 'no network $floaternet'"
     panic: "vtysh -c 'configure terminal' -c 'rouTEr bgp $asnum' -c 'network $floaternet'"
 
+logging:
+    # Graphite support?
+    graphite:
+        enabled: no 
+        carbon_server: 127.0.0.1
+        carbon_port: 2003
+    # Syslog support?
+    syslog:
+        enabled: yes 
+
 ## LIst of servers to test, along with their respective options
 servers:
     #Server 1
