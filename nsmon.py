@@ -57,10 +57,10 @@ cfg = processConfig()
 def convertMilliseconds(timestring):
     [hours, minutes, seconds] = str(timestring).split(':')
     [seconds, microseconds] = seconds.split('.')
-    milliseconds = int(int(hours) * 60 * 60 * 1000) +\
-        int(int(minutes) * 60 * 1000) +\
-        int(int(seconds) * 1000) +\
-        int(int(microseconds) / 1000)
+    milliseconds = float((float(hours) * 60 * 60 * 1000)
+        + (float(minutes) * 60 * 1000)
+        + (float(seconds) * 1000)
+        + (float(microseconds) / 1000))
     return milliseconds
 
 
@@ -101,7 +101,10 @@ class MonThread(threading.Thread):
 
     def run(self):
         serverip = self.kwargs['server']
-        print 'monitoring ' + serverip
+        timeout = self.kwargs['timeout']
+        lock = self.kwargs['lock']
+        with lock:
+            print 'monitoring ' + serverip
         if syslog:
             syslog.syslog('monitoring ' + serverip)
         count = 0
@@ -117,7 +120,8 @@ class MonThread(threading.Thread):
                     duration = convertMilliseconds(endTime - startTime)
                     if r.header['status'] == 'NOERROR':
                         if cfg['verbose']:
-                            print domain + '@' + serverip + ' OK'
+                            with lock:
+                                print domain + '@' + serverip + ' OK'
                     if (status == 'OK'):
                         statusQueue.put('OK'
                                 + ' '
@@ -148,11 +152,15 @@ class MonThread(threading.Thread):
 statusQueue = Queue.Queue()
 
 availableServers = cfg['servers'].keys()
-
+lock = threading.Lock()
 for server in cfg['servers']:
-    #print server + ' ' + str(cfg['servers'][server]['timeout'])
-    timeout = cfg['servers'][server]['timeout']
-    thread = MonThread(kwargs={'server': server})
+    # convert timeout config variable to a float representing
+    # a fraction of a second
+    timeout = int(cfg['servers'][server]['timeout']) / 1000
+    thread = MonThread(kwargs={'server': server,
+        'timeout': timeout,
+        'lock': lock,
+        })
     thread.daemon = True
     thread.start()
 
@@ -184,14 +192,18 @@ while (1):
                 sock = socket()
                 sock.connect((carbon_server, carbon_port))
                 if cfg['verbose']:
-                    print 'nsmon.responsetime.' + server + '.' + domain\
-                        + ' '\
-                        + str(duration)\
-                        + ' '\
-                        + str(int(time()))\
-                        + '\n'
+                    with lock:
+                        print 'nsmon.responsetime.' +\
+                            + server.replace('.', '_') \
+                            + '.' + domain.replace('.', '_')\
+                            + ' '\
+                            + str(duration)\
+                            + ' '\
+                            + str(int(time()))\
+                            + '\n'
 
-                sock.sendall('nsmon.responsetime.' + server + '.' + domain
+                sock.sendall('nsmon.responsetime.' + server.replace('.', '_')
+                        + '.' + domain.replace('.', '_')
                         + ' '
                         + str(duration)
                         + ' '
@@ -199,10 +211,12 @@ while (1):
                         + '\n')
                 sock.close()
             except:
-                print 'cannot contact carbon server'
+                with lock:
+                    print 'cannot contact carbon server'
         if (status == 'OK' and server not in availableServers):
             availableServers.append(server)
-            print 'Processing recovery of ' + server
+            with lock:
+                print 'Processing recovery of ' + server
             os.system(genCmd('serverup', server))
             if syslog:
                 syslog.syslog(server + 'recovered')
@@ -214,7 +228,8 @@ while (1):
                     syslog.syslog('system recovered due to ' + server)
         elif (status == 'BAD' and server in availableServers):
             availableServers.remove(server)
-            print 'failing ' + server
+            with lock:
+                print 'failing ' + server
             os.system(genCmd('serverdown', server))
             if (len(availableServers) == cfg['min_up'] - 1):
                 if syslog:
