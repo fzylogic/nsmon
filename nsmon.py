@@ -13,13 +13,13 @@ from time import sleep
 from time import time
 
 conffile = open('nsconfig.yml', 'r')
-syslog = False
-graphite = False
+__syslog = False
+__graphite = False
 
 
-def processConfig():
+def _processConfig():
     nsconfig = yaml.load(conffile)
-    cfg = {
+    _cfg = {
             'verbose': nsconfig.get('verbose', False),
             'domains': nsconfig.get('testdomains'),
             'frequency': nsconfig.get('frequency', 5),
@@ -48,13 +48,13 @@ def processConfig():
                             }
                 },
             }
-    return cfg
+    return _cfg
 
 
-cfg = processConfig()
+cfg = _processConfig()
 
 
-def convertMilliseconds(timestring):
+def _convert_milliseconds(timestring):
     [hours, minutes, seconds] = str(timestring).split(':')
     [seconds, microseconds] = seconds.split('.')
     milliseconds = float((float(hours) * 60 * 60 * 1000)
@@ -69,11 +69,11 @@ if cfg['logging']['graphite']['enabled']:
     carbon_server = cfg['logging']['graphite']['carbon_server']
     sock = socket()
     carbon_port = cfg['logging']['graphite']['carbon_port']
-    graphite = True
+    __graphite = True
     try:
         sock.connect((carbon_server, carbon_port))
         sock.close()
-    except:
+    except Exception:
         print "Couldn't connect to %(server)s on port %(port)d,\
              is carbon-agent.py running?" \
              % {'server': carbon_server, 'port': carbon_port}
@@ -81,12 +81,13 @@ if cfg['logging']['graphite']['enabled']:
 
 
 if cfg['logging']['syslog']['enabled']:
-    syslog = True
+    __syslog = True
     import syslog
     syslog.openlog('nsmon', 0, syslog.LOG_USER)
 
 
 class MonThread(threading.Thread):
+    """Thread subclass for server monitoring"""
     def __init__(self, group=None, target=None, name=None,
                 args=(), kwargs=None, verbose=None):
         threading.Thread.__init__(self,
@@ -104,8 +105,8 @@ class MonThread(threading.Thread):
         timeout = threading.local()
         serverip = self.kwargs['server']
         timeout = self.kwargs['timeout']
-        lock = self.kwargs['lock']
-        with lock:
+        _lock = self.kwargs['lock']
+        with _lock:
             print 'monitoring ' + serverip + ' with timeout '\
                     + str(timeout)
         if syslog:
@@ -115,16 +116,16 @@ class MonThread(threading.Thread):
             for domain in cfg['domains']:
                 startTime = datetime.datetime.now()
                 try:
-                    r = threading.local()
-                    r = DNS.Request(domain, qtype='A',
+                    req = threading.local()
+                    req = DNS.Request(domain, qtype='A',
                                     server=serverip,
                                     timeout=timeout).req()
                     endTime = datetime.datetime.now()
                     duration = threading.local()
-                    duration = convertMilliseconds(endTime - startTime)
-                    if r.header['status'] == 'NOERROR':
+                    duration = _convert_milliseconds(endTime - startTime)
+                    if req.header['status'] == 'NOERROR':
                         if cfg['verbose']:
-                            with lock:
+                            with _lock:
                                 print domain + '@' + serverip + ' OK'
                         statusQueue.put('OK'
                                 + ' '
@@ -133,9 +134,9 @@ class MonThread(threading.Thread):
                                 + domain
                                 + ' '
                                 + str(duration))
-                except:
+                except Exception:
                     endTime = datetime.datetime.now()
-                    duration = convertMilliseconds(endTime - startTime)
+                    duration = _convert_milliseconds(endTime - startTime)
                     statusQueue.put('BAD '
                             + serverip
                             + ' '
@@ -165,7 +166,7 @@ for server in cfg['servers']:
     thread.start()
 
 
-def genCmd(cmd, serverip):
+def _gen_cmd(cmd, serverip):
     try:
         cmd = cfg[cmd]
     except KeyError:
@@ -176,7 +177,6 @@ def genCmd(cmd, serverip):
         if replacementKey == 'serverip':
             cmd = cmd.replace(replacement, serverip)
         elif replacementKey in cfg:
-            print 'looking up key ' + replacementKey
             cmd = cmd.replace(replacement, str(cfg[replacementKey]))
         else:
             print 'cannot find ' + replacementKey + ' defined in config'
@@ -187,59 +187,62 @@ def genCmd(cmd, serverip):
 while (1):
     while not statusQueue.empty():
         statusline = statusQueue.get()
-        [status, server, domain, duration] = statusline.split()
+        [status, status_server, status_domain, status_duration] = \
+        statusline.split()
         print 'processing ' + statusline
-        if graphite:
+        if __graphite:
             try:
-                sock = socket()
-                sock.connect((carbon_server, carbon_port))
+                __sock = socket()
+                __sock.connect((carbon_server, carbon_port))
                 if cfg['verbose']:
                     with lock:
                         print 'nsmon.responsetime.' +\
-                            + server.replace('.', '_') \
-                            + '.' + domain.replace('.', '_')\
+                            + status_server.replace('.', '_') \
+                            + '.' + status_domain.replace('.', '_')\
                             + ' '\
-                            + str(duration)\
+                            + str(status_duration)\
                             + ' '\
                             + str(int(time()))\
                             + '\n'
 
-                sock.sendall('nsmon.responsetime.' + server.replace('.', '_')
-                        + '.' + domain.replace('.', '_')
+                __sock.sendall('nsmon.responsetime.'
+                        + status_server.replace('.', '_')
+                        + '.' + status_domain.replace('.', '_')
                         + ' '
-                        + str(duration)
+                        + str(status_duration)
                         + ' '
                         + str(int(time()))
                         + '\n')
-                sock.close()
-            except:
+                __sock.close()
+            except Exception:
                 with lock:
                     print 'cannot contact carbon server'
-        if (status == 'OK' and server not in availableServers):
-            availableServers.append(server)
+        if (status == 'OK' and status_server not in availableServers):
+            availableServers.append(status_server)
             with lock:
-                print 'Processing recovery of ' + server
-            os.system(genCmd('serverup', server))
-            if syslog:
-                syslog.syslog(server + 'recovered')
+                print 'Processing recovery of ' + status_server
+            os.system(_gen_cmd('serverup', status_server))
+            if __syslog:
+                syslog.syslog(status_server + 'recovered')
             if (len(availableServers) == cfg['min_up']):
                 # We just recovered from a failure state
                 # so we have to run recoverycmd
                 try:
-                    os.system(genCmd('recovery', server))
-                except:
+                    os.system(_gen_cmd('recovery', status_server))
+                except Exception:
                     pass
-                if syslog:
-                    syslog.syslog('system recovered due to ' + server)
-        elif (status == 'BAD' and server in availableServers):
-            availableServers.remove(server)
+                if __syslog:
+                    syslog.syslog('system recovered due to ' + status_server)
+        elif (status == 'BAD' and status_server in availableServers):
+            availableServers.remove(status_server)
             with lock:
-                print 'failing ' + server
-            os.system(genCmd('serverdown', server))
+                print 'failing ' + status_server
+            os.system(_gen_cmd('serverdown', status_server))
             if (len(availableServers) == cfg['min_up'] - 1):
                 print 'only ' + str(len(availableServers)) + ' rem. servers'
-                if syslog:
+                if __syslog:
                     syslog.syslog(
-                        'system being retracted due to failure of ' + server)
-                os.system(genCmd('panic', server))
+                        'system being retracted due to failure of '
+                        + status_server)
+                os.system(_gen_cmd('panic', status_server))
     sleep(1)
