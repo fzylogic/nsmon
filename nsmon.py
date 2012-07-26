@@ -100,29 +100,32 @@ class MonThread(threading.Thread):
         return
 
     def run(self):
+        serverip = threading.local()
+        timeout = threading.local()
         serverip = self.kwargs['server']
         timeout = self.kwargs['timeout']
         lock = self.kwargs['lock']
         with lock:
-            print 'monitoring ' + serverip
+            print 'monitoring ' + serverip + ' with timeout '\
+                    + str(timeout)
         if syslog:
             syslog.syslog('monitoring ' + serverip)
         count = 0
-        status = 'OK'
         while (1):
             for domain in cfg['domains']:
                 startTime = datetime.datetime.now()
                 try:
+                    r = threading.local()
                     r = DNS.Request(domain, qtype='A',
                                     server=serverip,
                                     timeout=timeout).req()
                     endTime = datetime.datetime.now()
+                    duration = threading.local()
                     duration = convertMilliseconds(endTime - startTime)
                     if r.header['status'] == 'NOERROR':
                         if cfg['verbose']:
                             with lock:
                                 print domain + '@' + serverip + ' OK'
-                    if (status == 'OK'):
                         statusQueue.put('OK'
                                 + ' '
                                 + serverip
@@ -130,18 +133,15 @@ class MonThread(threading.Thread):
                                 + domain
                                 + ' '
                                 + str(duration))
-                        status = 'OK'
                 except:
                     endTime = datetime.datetime.now()
                     duration = convertMilliseconds(endTime - startTime)
-                    if (status != 'BAD'):
-                        statusQueue.put('BAD '
-                                + serverip
-                                + ' '
-                                + domain
-                                + ' '
-                                + str(duration))
-                        status = 'BAD'
+                    statusQueue.put('BAD '
+                            + serverip
+                            + ' '
+                            + domain
+                            + ' '
+                            + str(duration))
             sleep(cfg['frequency'])
             if (cfg['cycles']):
                 count += 1
@@ -156,7 +156,7 @@ lock = threading.Lock()
 for server in cfg['servers']:
     # convert timeout config variable to a float representing
     # a fraction of a second
-    timeout = int(cfg['servers'][server]['timeout']) / 1000
+    timeout = float(cfg['servers'][server]['timeout']) / 1000
     thread = MonThread(kwargs={'server': server,
         'timeout': timeout,
         'lock': lock,
@@ -176,7 +176,8 @@ def genCmd(cmd, serverip):
         if replacementKey == 'serverip':
             cmd = cmd.replace(replacement, serverip)
         elif replacementKey in cfg:
-            cmd = cmd.replace(replacement, cfg[replacementKey])
+            print 'looking up key ' + replacementKey
+            cmd = cmd.replace(replacement, str(cfg[replacementKey]))
         else:
             print 'cannot find ' + replacementKey + ' defined in config'
             sys.exit()
@@ -187,6 +188,7 @@ while (1):
     while not statusQueue.empty():
         statusline = statusQueue.get()
         [status, server, domain, duration] = statusline.split()
+        print 'processing ' + statusline
         if graphite:
             try:
                 sock = socket()
@@ -223,7 +225,10 @@ while (1):
             if (len(availableServers) == cfg['min_up']):
                 # We just recovered from a failure state
                 # so we have to run recoverycmd
-                os.system(genCmd('recovery', server))
+                try:
+                    os.system(genCmd('recovery', server))
+                except:
+                    pass
                 if syslog:
                     syslog.syslog('system recovered due to ' + server)
         elif (status == 'BAD' and server in availableServers):
@@ -232,8 +237,9 @@ while (1):
                 print 'failing ' + server
             os.system(genCmd('serverdown', server))
             if (len(availableServers) == cfg['min_up'] - 1):
+                print 'only ' + str(len(availableServers)) + ' rem. servers'
                 if syslog:
                     syslog.syslog(
                         'system being retracted due to failure of ' + server)
-                os.system(genCmd('paniccmd', server))
-        sleep(1)
+                os.system(genCmd('panic', server))
+    sleep(1)
