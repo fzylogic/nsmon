@@ -12,46 +12,75 @@ import datetime
 from time import sleep
 from time import time
 
-conffile = open('nsconfig.yml', 'r')
 __syslog = False
 __graphite = False
 
 
-def _processConfig():
+class NsConfig:
+    conffile = open('nsconfig.yml', 'r')
     nsconfig = yaml.load(conffile)
-    _cfg = {
-            'verbose': nsconfig.get('verbose', False),
-            'domains': nsconfig.get('testdomains'),
-            'frequency': nsconfig.get('frequency', 5),
-            'serverup': nsconfig['cmds'].get('serverup'),
-            'serverdown': nsconfig['cmds'].get('serverdown'),
-            'panic': nsconfig['cmds'].get('panic'),
-            'recovery': nsconfig['cmds'].get('recovery'),
-            'min_up': nsconfig.get('min_up', 1),
-            'cycles': nsconfig.get('cycles', 0),
-            'servers': nsconfig.get('servers'),
-            'floaternet': nsconfig.get('floaternet'),
-            'floaterip': nsconfig.get('floaterip'),
-            'asnum': nsconfig.get('asnum', '61000'),
-            'logging': {
-                'graphite': {
-                    'enabled': nsconfig['logging']
-                            ['graphite'].get('enabled', 'no'),
-                    'carbon_server': nsconfig['logging']
-                            ['graphite'].get('carbon_server', '127.0.0.1'),
-                    'carbon_port': nsconfig['logging']
-                            ['graphite'].get('carbon_port', '127.0.0.1'),
-                            },
-                'syslog': {
-                    'enabled': nsconfig['logging']
-                            ['syslog'].get('enabled', 'no'),
-                            }
-                },
-            }
-    return _cfg
+
+    def domains(self):
+        return self.nsconfig.get('testdomains', [])
+
+    def verbose(self):
+        return self.nsconfig.get('verbose', False)
+
+    def frequency(self):
+        return self.nsconfig.get('frequency', 5)
+
+    def min_up(self):
+        return self.nsconfig.get('min_up', 1)
+
+    def get_cmd(self, cmd):
+        return self.nsconfig['cmds'].get(cmd, '/usr/bin/true')
+
+    def generate_cmd(self, cmd_alias, serverip):
+        full_cmd = self.get_cmd(cmd_alias)
+        for replacement in re.findall('\$[a-zA-Z0-9]+', full_cmd):
+            replacementKey = replacement.replace('$', '')
+            if replacementKey == 'serverip':
+                full_cmd = full_cmd.replace(replacement, serverip)
+            elif replacementKey in self.nsconfig:
+                full_cmd = full_cmd.replace(replacement,
+                        str(self.nsconfig[replacementKey]))
+            else:
+                    print 'cannot find ' + replacementKey \
+                            + ' defined in config'
+            return full_cmd
+
+    def serverup(self):
+        return self.nsconfig['cmds'].get('serverup', '/usr/bin/true')
+
+    def serverdown(self):
+        return self.nsconfig['cmds'].get('serverdown', '/usr/bin/true')
+
+    def panic(self):
+        return self.nsconfig['cmds'].get('panic', '/usr/bin/true')
+
+    def recovery(self):
+        return self.nsconfig['cmds'].get('panic', '/usr/bin/true')
+
+    def servers(self):
+        return self.nsconfig.get('servers', [])
+
+    def floaternet(self):
+        return self.nsconfig.get('floaternet', '')
+
+    def floaterip(self):
+        return self.nsconfig.get('floaterip', '')
+
+    def asnum(self):
+        return self.nsconfig.get('asnum', 60001)
+
+    def logging(self):
+        return self.nsconfig.get('logging', {})
+
+    def cycles(self):
+        return self.nsconfig.get('cycles', False)
 
 
-cfg = _processConfig()
+config = NsConfig()
 
 
 def _convert_milliseconds(timestring):
@@ -64,11 +93,11 @@ def _convert_milliseconds(timestring):
     return milliseconds
 
 
-if cfg['logging']['graphite']['enabled']:
+if config.logging()['graphite']['enabled']:
     from socket import socket
-    carbon_server = cfg['logging']['graphite']['carbon_server']
+    carbon_server = config.logging()['graphite']['carbon_server']
     sock = socket()
-    carbon_port = cfg['logging']['graphite']['carbon_port']
+    carbon_port = config.logging()['graphite']['carbon_port']
     __graphite = True
     try:
         sock.connect((carbon_server, carbon_port))
@@ -80,7 +109,7 @@ if cfg['logging']['graphite']['enabled']:
         sys.exit()
 
 
-if cfg['logging']['syslog']['enabled']:
+if config.logging()['syslog']['enabled']:
     __syslog = True
     import syslog
     syslog.openlog('nsmon', 0, syslog.LOG_USER)
@@ -113,7 +142,7 @@ class MonThread(threading.Thread):
             syslog.syslog('monitoring ' + serverip)
         count = 0
         while (1):
-            for domain in cfg['domains']:
+            for domain in config.domains():
                 startTime = datetime.datetime.now()
                 try:
                     req = threading.local()
@@ -124,7 +153,7 @@ class MonThread(threading.Thread):
                     duration = threading.local()
                     duration = _convert_milliseconds(endTime - startTime)
                     if req.header['status'] == 'NOERROR':
-                        if cfg['verbose']:
+                        if config.verbose():
                             with _lock:
                                 print domain + '@' + serverip + ' OK'
                         statusQueue.put('OK'
@@ -143,45 +172,27 @@ class MonThread(threading.Thread):
                             + domain
                             + ' '
                             + str(duration))
-            sleep(cfg['frequency'])
-            if (cfg['cycles']):
+            sleep(config.frequency())
+            if (config.cycles()):
                 count += 1
-                cycles = cfg['cycles']
+                cycles = config.cycles()
                 if (count >= cycles):
                     break
 
 statusQueue = Queue.Queue()
 
-availableServers = cfg['servers'].keys()
+availableServers = config.servers().keys()
 lock = threading.Lock()
-for server in cfg['servers']:
+for server in config.servers():
     # convert timeout config variable to a float representing
     # a fraction of a second
-    timeout = float(cfg['servers'][server]['timeout']) / 1000
+    timeout = float(config.servers()[server]['timeout']) / 1000
     thread = MonThread(kwargs={'server': server,
         'timeout': timeout,
         'lock': lock,
         })
     thread.daemon = True
     thread.start()
-
-
-def _gen_cmd(cmd, serverip):
-    try:
-        cmd = cfg[cmd]
-    except KeyError:
-        print 'cannot find cmd "' + cmd + '" in config file'
-        sys.exit()
-    for replacement in re.findall('\$[a-zA-Z0-9]+', cmd):
-        replacementKey = replacement.replace('$', '')
-        if replacementKey == 'serverip':
-            cmd = cmd.replace(replacement, serverip)
-        elif replacementKey in cfg:
-            cmd = cmd.replace(replacement, str(cfg[replacementKey]))
-        else:
-            print 'cannot find ' + replacementKey + ' defined in config'
-            sys.exit()
-    return cmd
 
 
 while (1):
@@ -191,14 +202,14 @@ while (1):
         statusline.split()
         print 'processing ' + statusline
         try:
-            servername = cfg['servers'][status_server]['name']
+            servername = config.servers()[status_server]['name']
         except KeyError:
             servername = status_server.replace('.', '_')
         if __graphite:
             try:
                 __sock = socket()
                 __sock.connect((carbon_server, carbon_port))
-                if cfg['verbose']:
+                if config.verbose():
                     with lock:
                         print 'nsmon.responsetime.' +\
                             + servername \
@@ -225,14 +236,14 @@ while (1):
             availableServers.append(status_server)
             with lock:
                 print 'Processing recovery of ' + status_server
-            os.system(_gen_cmd('serverup', status_server))
+            os.system(config.generate_cmd('serverup', status_server))
             if __syslog:
                 syslog.syslog(status_server + 'recovered')
-            if (len(availableServers) == cfg['min_up']):
+            if (len(availableServers) == config.min_up()):
                 # We just recovered from a failure state
                 # so we have to run recoverycmd
                 try:
-                    os.system(_gen_cmd('recovery', status_server))
+                    os.system(config.generate_cmd('recovery', status_server))
                 except Exception:
                     pass
                 if __syslog:
@@ -241,12 +252,12 @@ while (1):
             availableServers.remove(status_server)
             with lock:
                 print 'failing ' + status_server
-            os.system(_gen_cmd('serverdown', status_server))
-            if (len(availableServers) == cfg['min_up'] - 1):
+            os.system(config.generate_cmd('serverdown', status_server))
+            if (len(availableServers) == config.min_up() - 1):
                 print 'only ' + str(len(availableServers)) + ' rem. servers'
                 if __syslog:
                     syslog.syslog(
                         'system being retracted due to failure of '
                         + status_server)
-                os.system(_gen_cmd('panic', status_server))
+                os.system(config.generate_cmd('panic', status_server))
     sleep(0.1)
