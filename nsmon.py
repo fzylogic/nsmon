@@ -190,6 +190,10 @@ while (1):
         [status, status_server, status_domain, status_duration] = \
         statusline.split()
         print 'processing ' + statusline
+        try:
+            servername = cfg['servers'][status_server]['name']
+        except KeyError:
+            servername = status_server.replace('.', '_')
         if __graphite:
             try:
                 __sock = socket()
@@ -197,7 +201,7 @@ while (1):
                 if cfg['verbose']:
                     with lock:
                         print 'nsmon.responsetime.' +\
-                            + status_server.replace('.', '_') \
+                            + servername \
                             + '.' + status_domain.replace('.', '_')\
                             + ' '\
                             + str(status_duration)\
@@ -206,7 +210,7 @@ while (1):
                             + '\n'
 
                 __sock.sendall('nsmon.responsetime.'
-                        + status_server.replace('.', '_')
+                        + servername
                         + '.' + status_domain.replace('.', '_')
                         + ' '
                         + str(status_duration)
@@ -245,4 +249,4 @@ while (1):
                         'system being retracted due to failure of '
                         + status_server)
                 os.system(_gen_cmd('panic', status_server))
-    sleep(1)
+    sleep(0.1)
