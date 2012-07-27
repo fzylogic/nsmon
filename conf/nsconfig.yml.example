@@ -36,7 +36,7 @@ servers:
     127.0.0.1:
         # Timeout values are in milliseconds
         timeout: 500
-        # *optional* alias for the server, for the purpose of graphite
+        # *optional* alias for the server, for the purpose of graphite.
         # Please note that unlike the server's ip, this does not get sanitized
         # so any "." characters will make another path component in graphite
         name: test1

@@ -17,6 +17,8 @@ __graphite = False
 
 
 class NsConfig:
+    """Config class.  Reflects the imported dictionary with
+    a few extra smarts."""
     conffile = open('nsconfig.yml', 'r')
     nsconfig = yaml.load(conffile)
 
@@ -43,10 +45,10 @@ class NsConfig:
                 full_cmd = full_cmd.replace(replacement, serverip)
             elif replacementKey in self.nsconfig:
                 full_cmd = full_cmd.replace(replacement,
-                        str(self.nsconfig[replacementKey]))
+                                            str(self.nsconfig[replacementKey]))
             else:
                     print 'cannot find ' + replacementKey \
-                            + ' defined in config'
+                        + ' defined in config'
             return full_cmd
 
     def serverup(self):
@@ -86,10 +88,11 @@ config = NsConfig()
 def _convert_milliseconds(timestring):
     [hours, minutes, seconds] = str(timestring).split(':')
     [seconds, microseconds] = seconds.split('.')
-    milliseconds = float((float(hours) * 60 * 60 * 1000)
-        + (float(minutes) * 60 * 1000)
-        + (float(seconds) * 1000)
-        + (float(microseconds) / 1000))
+    milliseconds = float(
+                        (float(hours) * 60 * 60 * 1000) +
+                        (float(minutes) * 60 * 1000) +
+                        (float(seconds) * 1000) +
+                        (float(microseconds) / 1000))
     return milliseconds
 
 
@@ -118,7 +121,7 @@ if config.logging()['syslog']['enabled']:
 class MonThread(threading.Thread):
     """Thread subclass for server monitoring"""
     def __init__(self, group=None, target=None, name=None,
-                args=(), kwargs=None, verbose=None):
+                 args=(), kwargs=None, verbose=None):
         threading.Thread.__init__(self,
                                   group=group,
                                   target=target,
@@ -136,8 +139,8 @@ class MonThread(threading.Thread):
         timeout = self.kwargs['timeout']
         _lock = self.kwargs['lock']
         with _lock:
-            print 'monitoring ' + serverip + ' with timeout '\
-                    + str(timeout)
+            print 'monitoring ' + serverip + ' with timeout ' +\
+                str(timeout)
         if syslog:
             syslog.syslog('monitoring ' + serverip)
         count = 0
@@ -147,8 +150,8 @@ class MonThread(threading.Thread):
                 try:
                     req = threading.local()
                     req = DNS.Request(domain, qtype='A',
-                                    server=serverip,
-                                    timeout=timeout).req()
+                                      server=serverip,
+                                      timeout=timeout).req()
                     endTime = datetime.datetime.now()
                     duration = threading.local()
                     duration = _convert_milliseconds(endTime - startTime)
@@ -156,22 +159,22 @@ class MonThread(threading.Thread):
                         if config.verbose():
                             with _lock:
                                 print domain + '@' + serverip + ' OK'
-                        statusQueue.put('OK'
-                                + ' '
-                                + serverip
-                                + ' '
-                                + domain
-                                + ' '
-                                + str(duration))
+                        statusQueue.put('OK' +
+                                        ' ' +
+                                        serverip +
+                                        ' ' +
+                                        domain +
+                                        ' ' +
+                                        str(duration))
                 except Exception:
                     endTime = datetime.datetime.now()
                     duration = _convert_milliseconds(endTime - startTime)
-                    statusQueue.put('BAD '
-                            + serverip
-                            + ' '
-                            + domain
-                            + ' '
-                            + str(duration))
+                    statusQueue.put('BAD ' +
+                                    serverip +
+                                    ' ' +
+                                    domain +
+                                    ' ' +
+                                    str(duration))
             sleep(config.frequency())
             if (config.cycles()):
                 count += 1
@@ -188,9 +191,9 @@ for server in config.servers():
     # a fraction of a second
     timeout = float(config.servers()[server]['timeout']) / 1000
     thread = MonThread(kwargs={'server': server,
-        'timeout': timeout,
-        'lock': lock,
-        })
+                               'timeout': timeout,
+                               'lock': lock,
+                               })
     thread.daemon = True
     thread.start()
 
@@ -199,7 +202,7 @@ while (1):
     while not statusQueue.empty():
         statusline = statusQueue.get()
         [status, status_server, status_domain, status_duration] = \
-        statusline.split()
+            statusline.split()
         print 'processing ' + statusline
         try:
             servername = config.servers()[status_server]['name']
@@ -220,14 +223,14 @@ while (1):
                             + str(int(time()))\
                             + '\n'
 
-                __sock.sendall('nsmon.responsetime.'
-                        + servername
-                        + '.' + status_domain.replace('.', '_')
-                        + ' '
-                        + str(status_duration)
-                        + ' '
-                        + str(int(time()))
-                        + '\n')
+                __sock.sendall('nsmon.responsetime.' +
+                               servername +
+                               '.' + status_domain.replace('.', '_') +
+                               ' ' +
+                               str(status_duration) +
+                               ' ' +
+                               str(int(time())) +
+                               '\n')
                 __sock.close()
             except Exception:
                 with lock:
