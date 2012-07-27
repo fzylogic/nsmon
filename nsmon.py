@@ -23,7 +23,14 @@ class NsConfig:
     """Config class.  Reflects the imported dictionary with
     a few extra smarts."""
     def __init__(self):
-        conffile = open('nsconfig.yml', 'r')
+        try:
+            conffile = open('/etc/nsmon/nsconfig.yml')
+        except IOError:
+            try:
+                conffile = open('nsconfig.yml', 'r')
+            except IOError:
+                print 'Cannot find your nsconfig.yml'
+                sys.exit()
         self.nsconfig = yaml.load(conffile)
 
     def domains(self):
