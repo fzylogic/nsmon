@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 # vim: set syntax=python tabstop=4 expandtab:
 
+"""Simply DNS monitoring script for anycast or similar installations"""
+
+
 import DNS
 import yaml
 import threading
@@ -19,8 +22,9 @@ __graphite = False
 class NsConfig:
     """Config class.  Reflects the imported dictionary with
     a few extra smarts."""
-    conffile = open('nsconfig.yml', 'r')
-    nsconfig = yaml.load(conffile)
+    def __init__(self):
+        conffile = open('nsconfig.yml', 'r')
+        self.nsconfig = yaml.load(conffile)
 
     def domains(self):
         return self.nsconfig.get('testdomains', [])
@@ -38,6 +42,8 @@ class NsConfig:
         return self.nsconfig['cmds'].get(cmd, '/usr/bin/true')
 
     def generate_cmd(self, cmd_alias, serverip):
+        """Takes a command alias, such as 'serverup', finds it in the config,
+        and substitutes any variables found and then returns the full string"""
         full_cmd = self.get_cmd(cmd_alias)
         for replacement in re.findall('\$[a-zA-Z0-9]+', full_cmd):
             replacementKey = replacement.replace('$', '')
@@ -47,8 +53,8 @@ class NsConfig:
                 full_cmd = full_cmd.replace(replacement,
                                             str(self.nsconfig[replacementKey]))
             else:
-                    print 'cannot find ' + replacementKey \
-                        + ' defined in config'
+                print 'cannot find ' + replacementKey \
+                    + ' defined in config'
             return full_cmd
 
     def serverup(self):
@@ -86,6 +92,7 @@ config = NsConfig()
 
 
 def _convert_milliseconds(timestring):
+    """Convert a time string into the number of milliseconds it represents"""
     [hours, minutes, seconds] = str(timestring).split(':')
     [seconds, microseconds] = seconds.split('.')
     milliseconds = float(
@@ -107,7 +114,7 @@ if config.logging()['graphite']['enabled']:
         sock.close()
     except Exception:
         print "Couldn't connect to %(server)s on port %(port)d,\
-             is carbon-agent.py running?" \
+             is carbon-cache.py running?" \
              % {'server': carbon_server, 'port': carbon_port}
         sys.exit()
 
@@ -134,13 +141,13 @@ class MonThread(threading.Thread):
 
     def run(self):
         serverip = threading.local()
-        timeout = threading.local()
+        _timeout = threading.local()
         serverip = self.kwargs['server']
-        timeout = self.kwargs['timeout']
+        _timeout = self.kwargs['timeout']
         _lock = self.kwargs['lock']
         with _lock:
             print 'monitoring ' + serverip + ' with timeout ' +\
-                str(timeout)
+                str(_timeout)
         if syslog:
             syslog.syslog('monitoring ' + serverip)
         count = 0
@@ -151,7 +158,7 @@ class MonThread(threading.Thread):
                     req = threading.local()
                     req = DNS.Request(domain, qtype='A',
                                       server=serverip,
-                                      timeout=timeout).req()
+                                      timeout=_timeout).req()
                     endTime = datetime.datetime.now()
                     duration = threading.local()
                     duration = _convert_milliseconds(endTime - startTime)
@@ -203,7 +210,8 @@ while (1):
         statusline = statusQueue.get()
         [status, status_server, status_domain, status_duration] = \
             statusline.split()
-        print 'processing ' + statusline
+        if config.verbose():
+            print 'processing ' + statusline
         try:
             servername = config.servers()[status_server]['name']
         except KeyError:
